@@ -1,0 +1,60 @@
+name: Docker Compose Smoke Test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  docker-compose-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Start services
+        run: docker compose up --build -d
+
+      - name: Wait for API health
+        run: |
+          for attempt in {1..60}; do
+            if curl --fail --silent http://localhost:8000/health > /dev/null; then
+              exit 0
+            fi
+            sleep 5
+          done
+          docker compose logs
+          exit 1
+
+      - name: Show running services
+        run: docker compose ps
+
+      - name: Verify Swagger UI is reachable
+        run: curl --fail --silent http://localhost:8000/docs > /dev/null
+
+      - name: Verify POST endpoint
+        run: |
+          status=$(curl --silent --show-error --output response.json --write-out "%{http_code}" \
+            -X POST http://localhost:8000/metadata \
+            -H "Content-Type: application/json" \
+            -d '{"url":"http://fixture-site"}')
+          cat response.json
+          test "$status" = "201"
+          response=$(cat response.json)
+          echo "$response" | python -c "import json, sys; payload=json.load(sys.stdin); assert payload['status'] == 'completed'; assert 'page_source' in payload"
+
+      - name: Verify GET cache miss endpoint
+        run: |
+          status=$(curl --silent --show-error --output response.json --write-out "%{http_code}" \
+            "http://localhost:8000/metadata?url=http%3A%2F%2Ffixture-site%2Fbackground.html")
+          cat response.json
+          test "$status" = "202"
+
+      - name: Show container logs on failure
+        if: failure()
+        run: docker compose logs
+
+      - name: Stop services
+        if: always()
+        run: docker compose down -v

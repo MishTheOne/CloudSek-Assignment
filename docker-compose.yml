@@ -1,0 +1,57 @@
+services:
+  api:
+    build:
+      context: .
+    init: true
+    ports:
+      - "8000:8000"
+    environment:
+      MONGODB_URI: mongodb://mongodb:27017
+      DATABASE_NAME: cloudsek
+      COLLECTION_NAME: metadata_inventory
+      REQUEST_TIMEOUT_SECONDS: "15"
+      DATABASE_STARTUP_TIMEOUT_SECONDS: "30"
+      DATABASE_RETRY_INTERVAL_SECONDS: "2"
+      HTTP_VERIFY_SSL: "${HTTP_VERIFY_SSL:-false}"
+      HTTP_CA_BUNDLE_PATH: "${HTTP_CA_BUNDLE_PATH:-}"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+    volumes:
+      - ./certs:/certs:ro
+
+  fixture-site:
+    image: nginx:1.27-alpine
+    volumes:
+      - ./fixture-site:/usr/share/nginx/html:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+  mongodb:
+    image: mongo:7.0
+    ports:
+      - "27017:27017"
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    volumes:
+      - mongodb_data:/data/db
+    restart: unless-stopped
+
+volumes:
+  mongodb_data:
